@@ -1,6 +1,6 @@
 # **Aura Bluesky Bot**
 
-Code forked from [https://github.com/j4ckxyz/terri-bot](https://github.com/j4ckxyz/terri-bot)
+NOTE: This repo is not made to be built from, for that visit the original: [https://github.com/j4ckxyz/terri-bot](https://github.com/j4ckxyz/terri-bot)
 
 <img src="https://github.com/4uffin/aura-bot/blob/main/auraboticon.jpg?raw=true" width="200" height="auto" alt="Aura Bluesky Bot Icon">
 
