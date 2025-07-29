@@ -2,6 +2,8 @@
 
 Code forked from [https://github.com/j4ckxyz/terri-bot](https://github.com/j4ckxyz/terri-bot)
 
+<img src="https://github.com/4uffin/aura-bot/blob/main/auraboticon.jpg?raw=true" width="200" height="auto" alt="Aura Bluesky Bot Icon">
+
 ## **Introduction**
 
 Aura is an intelligent, context-aware bot designed to interact on Bluesky. It leverages advanced AI models to engage in natural conversations, provide information, generate new posts, and manage its interactions based on a sophisticated memory system and configurable directives. Aura aims to be a helpful, engaging, and supportive presence on the platform.
