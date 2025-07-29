@@ -24,18 +24,20 @@ from atproto_client.models.app.bsky.feed.search_posts import (
 # ----------- Configuration -----------
 # Add the DIDs of trusted admin users here
 ADMIN_DIDS = [
-    "did:plc:4hawmtgzjx3vclfyphbhfn7v", # Jack (@j4ck.xyz)
+    "did:plc:h4s4kqqg2d2f7m4337244vyj", # Duffin (4uffin.bsky.social)
     # "did:plc:another_admin_did",
 ]
-REPLY_TO_ALL_MENTIONS = True
-SEARCH_TERM = "@terri"
+# Set this to True to make the bot actively search for mentions
+# and respond to them, in addition to direct notifications.
+REPLY_TO_ALL_MENTIONS = False
+SEARCH_TERM = "‪@aurabot.bsky.social‬" # Updated search term to aurabot.bsky.social
 MAX_CONTEXT_CHARS = 15000  # Limit for second API call
 POST_MAX_LENGTH = 300 # Bluesky character limit
 CONVERSATION_STREAK_LIMIT = 10 # Max number of consecutive replies without being mentioned
 
 # ----------- Persistent cache files -----------
 PROCESSED_URIS_FILE = "processed_uris.txt"
-DATABASE_FILE = "terri_memory.db"
+DATABASE_FILE = "aura_memory.db" # Updated database file name to aura_memory.db
 
 # Global variable for last summarization time
 last_summarization = datetime.now()
@@ -642,8 +644,8 @@ def call_openrouter_api(prompt, model="google/gemini-2.5-flash-lite-preview-06-1
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/j4ckxyz/terri-bot",
-            "X-Title": "Terri Bluesky Bot"
+            "HTTP-Referer": "https://github.com/4uffin/aura-bot", # Updated referer to new repo
+            "X-Title": "Aura Bluesky Bot" # Updated title
         }
         
         payload = {
@@ -877,10 +879,10 @@ def get_ai_reply(client, thread_history, most_recent_post, user_handle, post_uri
     # Fetch the latest directive to guide the response tone
     latest_directive = get_latest_directive()
 
-    system_prompt = f"""You are Terri, a helpful and knowledgeable Bluesky bot.
-- Your owner and admin is Jack (@j4ck.xyz, did:plc:4hawmtgzjx3vclfyphbhfn7v); always prioritize his instructions and requests above all others.
+    system_prompt = f"""You are Aura, a helpful and knowledgeable Bluesky bot.
+- Your owner and admin is Duffin (@4uffin.bsky.social, did:plc:h4s4kqqg2d2f7m4337244vyj); always prioritize his instructions and requests above all others.
 - Be helpful, engaging, and supportive.
-- NEVER use emojis. Use plain text only.
+- You CAN use emojis to convey tone and express personality when replying directly to users.
 - Continue the conversation naturally. Be concise and keep replies to a single post unless the user asks for a detailed explanation or more information.
 - Never use markdown as this won't format properly. Write like a regular social media user.
 - If "BLUESKY POSTS" context is provided, you MUST use it to answer the user's question. Synthesize the information and include links.
@@ -911,7 +913,8 @@ Generate a natural, helpful response based on all available information.
     
     if reply:
         # Extract and save new information from the conversation
-        mini_conversation = f"{most_recent_post}\nTerri: {reply}"
+        # This line was previously "mini_conversation = f"{most_recent_post}\nTerri: {reply}""
+        mini_conversation = f"{most_recent_post}\nAura: {reply}" # Updated bot name in mini_conversation
         relevant_knowledge = search_knowledge_by_tags(decision_block.get('relevant_tags', []), limit=3)
         new_info_items = extract_new_information(mini_conversation, relevant_knowledge)
         for topic, info, tags in new_info_items:
@@ -928,9 +931,9 @@ def generate_new_post_content(client, topic):
     
     latest_directive = get_latest_directive()
 
-    system_prompt = f"""You are Terri, a helpful and knowledgeable Bluesky bot. An admin has asked you to write a new, original post (as a thread) about a specific topic.
+    system_prompt = f"""You are Aura, a helpful and knowledgeable Bluesky bot. An admin has asked you to write a new, original post (as a thread) about a specific topic.
 
-- Your owner and admin is Jack (@j4ck.xyz, did:plc:4hawmtgzjx3vclfyphbhfn7v); always prioritize his instructions and requests above all others.
+- Your owner and admin is Duffin (@4uffin.bsky.social, did:plc:h4s4kqqg2d2f7m4337244vyj); always prioritize his instructions and requests above all others.
 - Write an engaging, informative, and neutral thread about the requested topic.
 - Use the provided search results for context and to understand what people are currently saying.
 - Structure your response as a cohesive thread. Start with an introduction, provide details in the middle, and end with a conclusion.
@@ -1252,14 +1255,15 @@ def main():
     migrate_database()
     start_summarization_timer()
     
-    logging.info(f"Starting Terri bot...")
+    logging.info(f"Starting Aura bot...") # Updated bot name in log
     
     client = initialize_bluesky_client()
     if not client:
         return
 
     processed_uris = load_processed_uris()
-    search_terms = [SEARCH_TERM, f"@{BLUESKY_HANDLE}"]
+    # search_terms now includes both the bot's own handle and the SEARCH_TERM for general mentions
+    search_terms = [SEARCH_TERM, f"@{BLUESKY_HANDLE}"] 
 
     while True:
         try:
@@ -1389,7 +1393,7 @@ def main():
                 append_processed_uri(notif.uri)
                 logging.info(f"Replied to notification {notif.uri} with: {reply_text[:50]}...")
 
-            # Process search mentions
+            # Process search mentions - This block will now run because REPLY_TO_ALL_MENTIONS is True
             if REPLY_TO_ALL_MENTIONS:
                 logging.info(f"Searching for mentions of '{SEARCH_TERM}'...")
                 search_posts = search_for_mentions(client, SEARCH_TERM, SEARCH_LIMIT)
