@@ -1,4 +1,4 @@
-# **Aura Bluesky Bot Documentation**
+# **Aura Bluesky Bot**
 
 Code forked from [https://github.com/j4ckxyz/terri-bot](https://github.com/j4ckxyz/terri-bot)
 
