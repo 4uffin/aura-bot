@@ -1315,8 +1315,9 @@ def main():
                 available_blocks = get_available_memory_blocks()
                 decision_block = determine_action_and_memory(thread_history, most_recent_post, available_blocks)
                 
-                # Check for Admin Commands
+                # Check for Admin Commands (these remain admin-only)
                 if author_did in ADMIN_DIDS:
+                    # Admin-only: direct 'post' command (for specific content)
                     if post_text.lower().startswith(f'@{BLUESKY_HANDLE.lower()} post '):
                         post_content = re.sub(f'@{BLUESKY_HANDLE}', '', post_text, flags=re.IGNORECASE).replace('post', '', 1).strip()
                         if post_content:
@@ -1327,6 +1328,7 @@ def main():
                             append_processed_uri(notif.uri)
                             continue
                     
+                    # Admin-only: 'directive' command
                     if post_text.lower().startswith(f'@{BLUESKY_HANDLE.lower()} directive '):
                         instruction = re.sub(f'@{BLUESKY_HANDLE}', '', post_text, flags=re.IGNORECASE).replace('directive', '', 1).strip()
                         if instruction:
@@ -1339,7 +1341,8 @@ def main():
                             append_processed_uri(notif.uri)
                             continue
                 
-                # Check for "write post" command from any user
+                # Check for "write post" command from any user (this is the change)
+                # This block is now outside the ADMIN_DIDS check
                 if decision_block.get('action') == 'write_post' and decision_block.get('query'):
                     topic = decision_block['query']
                     logging.info(f"User {notif.author.handle} requested a new post about: '{topic}'")
