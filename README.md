@@ -2,7 +2,7 @@
 
 NOTE: This repo is not made to be built from, for that visit the original: [https://github.com/j4ckxyz/terri-bot](https://github.com/j4ckxyz/terri-bot)
 
-<img src="https://github.com/4uffin/aura-bot/blob/main/auraboticon.jpg?raw=true" width="200" height="auto" alt="Aura Bluesky Bot Icon">
+<img src="https://github.com/4uffin/aura-bot/blob/main/auraboticon.jpg?raw=true" width="200" height="auto" ALT="Aura Bluesky Bot Icon">
 
 ## **Introduction**
 
@@ -29,7 +29,7 @@ Aura can perform live searches on Bluesky to gather real-time information relate
 
 Aura can generate new top-level posts (threads) on specific topics, either initiated by an admin or requested by a user.
 
-* **User-Initiated:** Users can request Aura to "write a post/thread about X."  
+* **User-Initiated:** Users can request Aura to "write a post/thread about X." Aura will send an acknowledgement reply that is correctly linked to the original command.  
 * **Contextual Research:** Gathers information from Bluesky searches before composing the post.  
 * **Threaded Output:** Automatically splits long content into multiple posts, forming a cohesive thread.  
 * **Safety Checks:** Topics are vetted for safety and appropriateness before posting.
@@ -95,9 +95,8 @@ Aura relies on environment variables and internal constants for configuration.
 
 * ADMIN\_DIDS: A Python list of Bluesky DIDs (Decentralized Identifiers) for trusted administrators. Only DIDs in this list can issue admin commands.  
 * REPLY\_TO\_ALL\_MENTIONS: Set to True if the bot should actively search for and respond to general mentions of its SEARCH\_TERM in addition to direct notifications. Set to False for only responding to direct mentions/replies.  
-* SEARCH\_TERM: The specific term (e.g., your bot's handle) that Aura will search for if REPLY\_TO\_ALL\_MENTIONS is True.  
-* MAX\_CONTEXT\_CHARS: Maximum character limit for the context provided to the AI.  
-* POST\_MAX\_LENGTH: Bluesky's character limit for a single post (currently 300).  
+* SEARCH\_TERM: The specific term (e.g., your bot's handle) that Aura will search for if REPLY\_TO\_ALL\_MENTIONS is True. This has been corrected to ensure accurate mention detection.  
+* POST\_MAX\_LENGTH: Bluesky's character limit for a single post (set to 300 characters).  
 * CONVERSATION\_STREAK\_LIMIT: The maximum number of consecutive replies Aura will send in a thread without being directly mentioned again before it stops replying to that thread.  
 * MENTION\_CHECK\_INTERVAL\_SECONDS: How often Aura checks for new notifications and mentions (in seconds).  
 * NOTIFICATION\_FETCH\_LIMIT: The number of notifications to fetch in each check.  
