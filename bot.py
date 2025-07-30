@@ -3,11 +3,11 @@ import os
 import time
 import logging
 import requests
-import json
+import json # Import json for logging raw responses
 import sqlite3
 import re
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date, timezone # Import date and timezone
 from dotenv import load_dotenv
 from atproto import Client, models
 from atproto.exceptions import AtProtocolError
@@ -21,6 +21,43 @@ from atproto_client.models.app.bsky.feed.search_posts import (
     Params as SearchPostsParams,
 )
 
+# ----------- SQLite3 Datetime Adapters and Converters (for Python 3.12+) -----------
+# These functions ensure that datetime objects are stored and retrieved from SQLite
+# in a consistent, timezone-aware (ISO 8601) format, addressing the deprecation
+# warning in Python 3.12 regarding default datetime adapters.
+
+def adapt_date_iso(val: date) -> str:
+    """Adapt datetime.date to ISO 8601 date string."""
+    return val.isoformat()
+
+def adapt_datetime_iso(val: datetime) -> str:
+    """Adapt datetime.datetime to ISO 8601 datetime string with timezone.
+    
+    Ensures the datetime is timezone-aware and converts it to UTC for consistent storage.
+    If a naive datetime is provided, it's assumed to be in UTC before conversion.
+    """
+    if val.tzinfo is None:
+        # Assume naive datetimes are UTC if no timezone is specified
+        val = val.replace(tzinfo=timezone.utc)
+    return val.isoformat()
+
+def convert_date_iso(val: bytes) -> date:
+    """Convert ISO 8601 date string (from bytes) to datetime.date."""
+    return date.fromisoformat(val.decode('utf-8'))
+
+def convert_datetime_iso(val: bytes) -> datetime:
+    """Convert ISO 8601 datetime string (from bytes) to timezone-aware datetime.datetime."""
+    # datetime.fromisoformat can parse timezone information if present in the string
+    return datetime.fromisoformat(val.decode('utf-8'))
+
+# Register the custom adapters and converters with sqlite3
+sqlite3.register_adapter(date, adapt_date_iso)
+sqlite3.register_adapter(datetime, adapt_datetime_iso)
+# Register converters for 'DATE' and 'DATETIME' column types in SQLite
+sqlite3.register_converter("date", convert_date_iso)
+sqlite3.register_converter("datetime", convert_datetime_iso)
+
+
 # ----------- Configuration -----------
 # Add the DIDs of trusted admin users here
 ADMIN_DIDS = [
@@ -30,9 +67,8 @@ ADMIN_DIDS = [
 # Set this to True to make the bot actively search for mentions
 # and respond to them, in addition to direct notifications.
 REPLY_TO_ALL_MENTIONS = False
-SEARCH_TERM = "‪@aurabot.bsky.social‬" # Updated search term to aurabot.bsky.social
-MAX_CONTEXT_CHARS = 15000  # Limit for second API call
-POST_MAX_LENGTH = 300 # Bluesky character limit
+SEARCH_TERM = "@aurabot.bsky.social" # Corrected search term, removed hidden unicode characters
+POST_MAX_LENGTH = 300 # Bluesky character limit is 300
 CONVERSATION_STREAK_LIMIT = 10 # Max number of consecutive replies without being mentioned
 
 # ----------- Persistent cache files -----------
@@ -40,12 +76,12 @@ PROCESSED_URIS_FILE = "processed_uris.txt"
 DATABASE_FILE = "aura_memory.db" # Updated database file name to aura_memory.db
 
 # Global variable for last summarization time
-last_summarization = datetime.now()
+last_summarization = datetime.now(timezone.utc) # Initialize with timezone-aware datetime
 
 # ----------- Real World Context Functions -----------
 def get_current_context():
     """Get current real-world context information."""
-    now = datetime.now()
+    now = datetime.now(timezone.utc) # Use timezone-aware datetime
     
     # Basic time information
     current_time = now.strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -91,8 +127,11 @@ def get_current_context():
 
 # ----------- Enhanced Database Functions -----------
 def initialize_database():
-    """Initialize the SQLite database with all required tables."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    """Initialize the SQLite database with all required tables.
+    
+    Uses detect_types to enable custom converters for DATE and DATETIME columns.
+    """
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     
     # User memories table
@@ -197,7 +236,7 @@ def initialize_database():
 
 def add_conversation_stop(root_uri):
     """Adds a conversation's root URI to the stop list."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('INSERT OR IGNORE INTO conversation_stops (root_uri) VALUES (?)', (root_uri,))
     conn.commit()
@@ -208,7 +247,7 @@ def is_conversation_stopped(root_uri):
     """Checks if a conversation is on the stop list."""
     if not root_uri:
         return False
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('SELECT 1 FROM conversation_stops WHERE root_uri = ?', (root_uri,))
     result = cursor.fetchone()
@@ -217,7 +256,7 @@ def is_conversation_stopped(root_uri):
 
 def get_reply_streak(root_uri):
     """Gets the current reply streak for a conversation."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('SELECT streak_count FROM reply_streaks WHERE root_uri = ?', (root_uri,))
     result = cursor.fetchone()
@@ -226,13 +265,14 @@ def get_reply_streak(root_uri):
 
 def increment_reply_streak(root_uri):
     """Increments the reply streak for a conversation."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('SELECT streak_count FROM reply_streaks WHERE root_uri = ?', (root_uri,))
     result = cursor.fetchone()
     if result:
         new_streak = result[0] + 1
-        cursor.execute('UPDATE reply_streaks SET streak_count = ?, timestamp = CURRENT_TIMESTAMP WHERE root_uri = ?', (new_streak, root_uri))
+        # Use datetime.now(timezone.utc) for timestamp update
+        cursor.execute('UPDATE reply_streaks SET streak_count = ?, timestamp = ? WHERE root_uri = ?', (new_streak, datetime.now(timezone.utc), root_uri))
     else:
         cursor.execute('INSERT INTO reply_streaks (root_uri, streak_count) VALUES (?, 1)', (root_uri,))
     conn.commit()
@@ -241,16 +281,17 @@ def increment_reply_streak(root_uri):
 
 def reset_reply_streak(root_uri):
     """Resets the reply streak for a conversation to 0."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
-    cursor.execute('INSERT OR REPLACE INTO reply_streaks (root_uri, streak_count, timestamp) VALUES (?, 0, CURRENT_TIMESTAMP)', (root_uri,))
+    # Use datetime.now(timezone.utc) for timestamp update
+    cursor.execute('INSERT OR REPLACE INTO reply_streaks (root_uri, streak_count, timestamp) VALUES (?, 0, ?)', (root_uri, datetime.now(timezone.utc)))
     conn.commit()
     conn.close()
     logging.info(f"Reset reply streak for {root_uri}.")
 
 def get_latest_directive():
     """Retrieves the most recent response directive from the database."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('SELECT directive_text FROM response_directives ORDER BY timestamp DESC LIMIT 1')
     result = cursor.fetchone()
@@ -259,7 +300,7 @@ def get_latest_directive():
 
 def save_directive(directive_text):
     """Saves a new response directive to the database."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('INSERT INTO response_directives (directive_text) VALUES (?)', (directive_text,))
     conn.commit()
@@ -286,7 +327,7 @@ Output only the new, combined set of instructions.
 
 def migrate_database():
     """Migrate database schema to handle missing columns."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     
     try:
@@ -322,7 +363,7 @@ def save_post_history(user_handle, post_text, post_uri, thread_context=""):
         logging.warning(f"Blocked saving post history due to word: {blocked_word}")
         return False
         
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO post_history (user_handle, post_text, post_uri, thread_context)
@@ -346,7 +387,7 @@ def save_user_memory(user_handle, memory_key, memory_value, requesting_user_hand
         logging.warning(f"Blocked saving memory due to word: {blocked_word}")
         return False
         
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT OR REPLACE INTO user_memories (user_handle, memory_key, memory_value)
@@ -359,7 +400,7 @@ def save_user_memory(user_handle, memory_key, memory_value, requesting_user_hand
 
 def get_user_memories(user_handle):
     """Get all memories for a specific user."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT memory_key, memory_value FROM user_memories 
@@ -382,7 +423,7 @@ def save_general_knowledge(topic, information, tags=""):
         logging.info(f"Knowledge already exists, skipping: {information[:50]}...")
         return False
         
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO general_knowledge (topic, information, tags) VALUES (?, ?, ?)
@@ -394,7 +435,7 @@ def save_general_knowledge(topic, information, tags=""):
 
 def knowledge_exists(information):
     """Check if similar knowledge already exists in the database."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     
     # Check for exact match first
@@ -413,7 +454,7 @@ def knowledge_exists(information):
 
 def get_available_memory_blocks():
     """Get a summary of available memory blocks for the first API call."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     
     # Get user handles that have memories
@@ -433,6 +474,7 @@ def get_available_memory_blocks():
     unique_tags = list(set(all_tags))
     
     # Get recent thread participants
+    # Note: sqlite3's datetime('now', '-7 days') is fine here as it's a SQLite function
     cursor.execute('''
         SELECT DISTINCT user_handle FROM post_history 
         WHERE timestamp > datetime('now', '-7 days') 
@@ -454,7 +496,7 @@ def search_knowledge_by_tags(tags_list, limit=10):
     if not tags_list:
         return []
     
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     
     # Create a query that searches for any of the tags
@@ -504,7 +546,7 @@ def search_knowledge_by_tags(tags_list, limit=10):
 
 def get_user_post_history(user_handle, limit=10):
     """Get recent post history for a specific user."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('''
         SELECT post_text, thread_context, timestamp FROM post_history 
@@ -516,7 +558,7 @@ def get_user_post_history(user_handle, limit=10):
 
 def get_summarized_knowledge(summary_type=None, user_handle=None, limit=5):
     """Get summarized knowledge from the database."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     
     query = 'SELECT summary_content, tags, user_handle FROM summarized_knowledge WHERE 1=1'
@@ -540,7 +582,7 @@ def get_summarized_knowledge(summary_type=None, user_handle=None, limit=5):
 
 def check_blocklist(text):
     """Check if text contains any blocklisted words."""
-    conn = sqlite3.connect(DATABASE_FILE)
+    conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
     cursor = conn.cursor()
     cursor.execute('SELECT word FROM blocklist')
     blocklisted_words = [row[0] for row in cursor.fetchall()]
@@ -553,25 +595,33 @@ def check_blocklist(text):
     return False, None
 
 def extract_tags_from_text(text):
-    """Extract potential tags from text content."""
-    # Look for topics, subjects, and key concepts
-    tag_patterns = [
-        r'\b(science|technology|biology|physics|chemistry|math|history|art|music|literature)\b',
-        r'\b(programming|coding|python|javascript|ai|machine learning|data)\b',
-        r'\b(cat|dog|animal|pet|nature|environment|climate)\b',
-        r'\b(food|cooking|recipe|restaurant|health|fitness)\b',
-        r'\b(movie|film|book|game|video|entertainment)\b',
-        r'\b(travel|vacation|city|country|culture|language)\b'
-    ]
+    """
+    Extracts potential tags from text content using an AI model.
+    This replaces the previous regex-based approach for more intelligent tagging.
+    """
+    if not text:
+        logging.debug("No text provided for tag extraction. Returning empty string.")
+        return ""
+
+    prompt = f"""
+    Analyze the following text and extract the most relevant keywords or tags.
+    Provide a comma-separated list of tags. Ensure tags are concise and relevant.
+    If no relevant tags are found, return an empty string.
+
+    Text: "{text}"
+    """
     
-    tags = set()
-    text_lower = text.lower()
+    # Call the OpenRouter API
+    response = call_openrouter_api(prompt, max_tokens=50) # Keep max_tokens low for concise tags
     
-    for pattern in tag_patterns:
-        matches = re.findall(pattern, text_lower)
-        tags.update(matches)
-    
-    return ', '.join(sorted(tags)) if tags else ""
+    if response:
+        # Clean and split the response into a list of tags
+        # Remove any leading/trailing whitespace and filter out empty strings
+        tags = [tag.strip() for tag in response.split(',') if tag.strip()]
+        logging.debug(f"Extracted AI tags: {tags} for text: {text[:50]}...")
+        return ', '.join(sorted(tags))
+    logging.debug(f"AI tag extraction returned no response for text: {text[:50]}...")
+    return ""
 
 # ----------- Mention/Facet Handling -----------
 def create_facets_for_mentions(client, text):
@@ -662,10 +712,14 @@ def call_openrouter_api(prompt, model="google/gemini-2.5-flash-lite-preview-06-1
         
         api_url = "https://openrouter.ai/api/v1/chat/completions"
         
+        logging.debug(f"Sending prompt to OpenRouter API:\n{prompt}") # Log the prompt
+        
         resp = requests.post(api_url, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         
         response_data = resp.json()
+        logging.debug(f"Received raw OpenRouter API response:\n{json.dumps(response_data, indent=2)}") # Log raw response
+        
         if 'choices' in response_data and len(response_data['choices']) > 0:
             content = response_data['choices'][0]['message']['content']
             return content.strip()
@@ -756,9 +810,16 @@ Return ONLY a JSON object with these keys:
                 'relevant_tags': result.get('relevant_tags', [])
             }
         else:
+            # If no JSON object is found in the AI response
+            logging.error(f"AI response did not contain a valid JSON object. Raw response: '{response}'")
             raise ValueError("No JSON object found in AI response.")
+    except json.JSONDecodeError as e:
+        # Catch specific JSON decoding errors
+        logging.error(f"Failed to parse AI response as JSON: {e}. Raw response: '{response}'")
+        return {'action': 'reply', 'query': None, 'relevant_users': [], 'relevant_topics': [], 'relevant_tags': []}
     except Exception as e:
-        logging.warning(f"Failed to parse AI router decision: {e}. Raw response: '{response}'")
+        # Catch any other unexpected errors during parsing
+        logging.error(f"Failed to parse AI router decision: {e}. Raw response: '{response}'")
         return {'action': 'reply', 'query': None, 'relevant_users': [], 'relevant_topics': [], 'relevant_tags': []}
 
 def build_focused_context(relevant_blocks):
@@ -915,7 +976,10 @@ Generate a natural, helpful response based on all available information.
         # Extract and save new information from the conversation
         # This line was previously "mini_conversation = f"{most_recent_post}\nTerri: {reply}""
         mini_conversation = f"{most_recent_post}\nAura: {reply}" # Updated bot name in mini_conversation
-        relevant_knowledge = search_knowledge_by_tags(decision_block.get('relevant_tags', []), limit=3)
+        # Now using the AI-powered extract_tags_from_text
+        # Ensure that if extract_tags_from_text returns an empty string, it results in an empty list for search_knowledge_by_tags
+        tags_from_ai = extract_tags_from_text(mini_conversation)
+        relevant_knowledge = search_knowledge_by_tags(tags_from_ai.split(', ') if tags_from_ai else [], limit=3)
         new_info_items = extract_new_information(mini_conversation, relevant_knowledge)
         for topic, info, tags in new_info_items:
             save_general_knowledge(topic, info, tags)
@@ -956,15 +1020,6 @@ Please now write the full text for the post thread.
     return call_openrouter_api(full_prompt, max_tokens=1500)
 
 
-def extract_learning_request(text):
-    """Extract learning requests from user text."""
-    patterns = [r'remember that (.+)', r'learn that (.+)']
-    for pattern in patterns:
-        match = re.search(pattern, text.lower())
-        if match:
-            return match.group(1).strip()
-    return None
-
 def _send_single_post(client, text, reply_to=None):
     """Helper to send one post with mentions and links."""
     mention_facets = create_facets_for_mentions(client, text)
@@ -980,7 +1035,8 @@ def split_into_chunks(text, max_length):
     current_chunk = ""
     
     for word in words:
-        if len(current_chunk) + len(word) + 1 < max_length - 10: # Reserve space for numbering
+        # Check byte length for accurate Bluesky character count
+        if len((current_chunk + " " + word).encode('utf-8')) < max_length - 10: # Reserve space for numbering
             current_chunk += f" {word}"
         else:
             chunks.append(current_chunk.strip())
@@ -1046,10 +1102,12 @@ def summarize_database():
         logging.info("Starting database summarization...")
         current_context = get_current_context()
         
-        conn = sqlite3.connect(DATABASE_FILE)
+        # Ensure the connection uses the custom converters
+        conn = sqlite3.connect(DATABASE_FILE, detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
         cursor = conn.cursor()
         
         # Get users who have interacted recently
+        # Note: sqlite3's datetime('now', '-24 hours') is fine here as it's a SQLite function
         cursor.execute('''
             SELECT DISTINCT user_handle FROM post_history 
             WHERE timestamp > datetime('now', '-24 hours')
@@ -1083,19 +1141,20 @@ Brief summary only:"""
 
                 summary = call_openrouter_api(summary_prompt, max_tokens=200)
                 if summary:
-                    tags = extract_tags_from_text(posts_text)
+                    # Use the AI-powered extract_tags_from_text for the summary
+                    tags = extract_tags_from_text(posts_text) 
                     
                     # Save or update user summary
                     cursor.execute('''
                         INSERT OR REPLACE INTO summarized_knowledge 
                         (summary_type, user_handle, summary_content, tags, last_updated)
                         VALUES (?, ?, ?, ?, ?)
-                    ''', ("user_summary", user_handle, summary, tags, datetime.now()))
+                    ''', ("user_summary", user_handle, summary, tags, datetime.now(timezone.utc))) # Use timezone-aware datetime
         
         conn.commit()
         conn.close()
         
-        last_summarization = datetime.now()
+        last_summarization = datetime.now(timezone.utc) # Update with timezone-aware datetime
         logging.info("Database summarization completed successfully")
         
     except Exception as e:
@@ -1247,7 +1306,7 @@ NOTIFICATION_FETCH_LIMIT = 30
 SEARCH_LIMIT = 20
 
 logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.DEBUG, format="%(asctime)s - %(levelname)s - %(message)s" # Changed level to DEBUG
 )
 
 def main():
@@ -1348,6 +1407,7 @@ def main():
                     logging.info(f"User {notif.author.handle} requested a new post about: '{topic}'")
                     
                     # First, send an acknowledgement reply
+                    # BUG FIX: Changed uri=notif.cid to uri=notif.uri for the parent reference
                     reply_to = models.AppBskyFeedPost.ReplyRef(root=root_ref, parent=models.ComAtprotoRepoStrongRef.Main(cid=notif.cid, uri=notif.uri))
                     send_reply_thread(client, f"On it! I'll write a thread about '{topic}'. Give me a moment to gather my thoughts.", reply_to=reply_to)
 
